@@ -7,18 +7,10 @@ from app.database import get_connection
 
 
 ROOT = Path(__file__).resolve().parents[1]
-
-DEFAULT_GROUND_TRUTH = (
-    ROOT / "data" / "generated" / "ground_truth.json"
-)
+DEFAULT_GROUND_TRUTH = ROOT / "data" / "generated" / "ground_truth.json"
 
 
 def open_audit_connection(db_path=None):
-    """
-    Open the original application database when no path is supplied.
-    Open a separate database when db_path is provided.
-    """
-
     if db_path is None:
         return get_connection()
 
@@ -26,37 +18,42 @@ def open_audit_connection(db_path=None):
         str(db_path),
         timeout=30
     )
-
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
     connection.execute("PRAGMA busy_timeout = 30000")
-
     return connection
 
 
-def calculate_ledger_balance(connection, account_id):
-
+def table_exists(connection, table_name):
     result = connection.execute(
         """
-        SELECT
-            COALESCE(
-                SUM(
-                    CASE
-                        WHEN transaction_type IN (
-                            'ACCRUAL', 'ADJUSTMENT'
-                        )
-                            THEN points
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table' AND name = ?
+        """,
+        (table_name,)
+    ).fetchone()
 
-                        WHEN transaction_type IN (
-                            'REDEMPTION', 'REVERSAL', 'EXPIRY'
-                        )
-                            THEN -points
+    return result is not None
 
-                        ELSE 0
-                    END
-                ),
-                0
-            ) AS ledger_balance
+
+def calculate_ledger_balance(connection, account_id):
+    result = connection.execute(
+        """
+        SELECT COALESCE(
+            SUM(
+                CASE
+                    WHEN transaction_type IN ('ACCRUAL', 'ADJUSTMENT')
+                        THEN points
+                    WHEN transaction_type IN (
+                        'REDEMPTION', 'REVERSAL', 'EXPIRY'
+                    )
+                        THEN -points
+                    ELSE 0
+                END
+            ),
+            0
+        ) AS ledger_balance
         FROM points_transactions
         WHERE account_id = ?
         """,
@@ -67,7 +64,6 @@ def calculate_ledger_balance(connection, account_id):
 
 
 def audit_account_balances(db_path=None):
-
     connection = open_audit_connection(db_path)
 
     try:
@@ -81,15 +77,14 @@ def audit_account_balances(db_path=None):
         issues = []
 
         for account in accounts:
-
             ledger_balance = calculate_ledger_balance(
                 connection,
                 account["account_id"]
             )
 
             if ledger_balance != account["stored_balance"]:
-
                 issues.append({
+                    "entity_id": account["account_id"],
                     "account_id": account["account_id"],
                     "stored_balance": account["stored_balance"],
                     "ledger_balance": ledger_balance,
@@ -106,7 +101,6 @@ def audit_account_balances(db_path=None):
 
 
 def validate_foreign_keys(db_path=None):
-
     connection = open_audit_connection(db_path)
 
     try:
@@ -130,7 +124,6 @@ def validate_foreign_keys(db_path=None):
 
 
 def validate_primary_keys(db_path=None):
-
     connection = open_audit_connection(db_path)
 
     tables = [
@@ -154,6 +147,8 @@ def validate_primary_keys(db_path=None):
 
     try:
         for table, column in tables:
+            if not table_exists(connection, table):
+                continue
 
             result = connection.execute(
                 f"""
@@ -165,7 +160,6 @@ def validate_primary_keys(db_path=None):
             ).fetchall()
 
             for row in result:
-
                 issues.append({
                     "table": table,
                     "id": row[column],
@@ -180,10 +174,12 @@ def validate_primary_keys(db_path=None):
 
 
 def validate_order_arithmetic(db_path=None):
-
     connection = open_audit_connection(db_path)
 
     try:
+        if not table_exists(connection, "orders"):
+            return []
+
         rows = connection.execute(
             """
             SELECT
@@ -199,7 +195,6 @@ def validate_order_arithmetic(db_path=None):
         issues = []
 
         for row in rows:
-
             expected = (
                 row["gross_amount"]
                 - row["discount_amount"]
@@ -207,8 +202,8 @@ def validate_order_arithmetic(db_path=None):
             )
 
             if abs(expected - row["net_amount"]) > 0.01:
-
                 issues.append({
+                    "entity_id": row["order_id"],
                     "order_id": row["order_id"],
                     "expected_net": expected,
                     "actual_net": row["net_amount"],
@@ -222,10 +217,12 @@ def validate_order_arithmetic(db_path=None):
 
 
 def detect_over_redemptions(db_path=None):
-
     connection = open_audit_connection(db_path)
 
     try:
+        if not table_exists(connection, "redemptions"):
+            return []
+
         rows = connection.execute(
             """
             SELECT
@@ -258,10 +255,12 @@ def detect_over_redemptions(db_path=None):
 
 
 def detect_returns_without_reversal(db_path=None):
-
     connection = open_audit_connection(db_path)
 
     try:
+        if not table_exists(connection, "returns"):
+            return []
+
         rows = connection.execute(
             """
             SELECT
@@ -296,33 +295,42 @@ def detect_returns_without_reversal(db_path=None):
 
 
 def detect_duplicate_expiries(db_path=None):
-
     connection = open_audit_connection(db_path)
 
     try:
-        rows = connection.execute(
-            """
-            SELECT
-                lot_id,
-                COUNT(*) AS expiry_count,
-                GROUP_CONCAT(expiry_id) AS expiry_ids
-            FROM (
+        if not table_exists(connection, "expiry_batches"):
+            return []
+
+        if table_exists(connection, "anomaly_expiry_evidence"):
+            query = """
                 SELECT
                     lot_id,
-                    expiry_id
+                    COUNT(*) AS expiry_count,
+                    GROUP_CONCAT(expiry_id) AS expiry_ids
+                FROM (
+                    SELECT lot_id, expiry_id
+                    FROM expiry_batches
+
+                    UNION ALL
+
+                    SELECT lot_id, evidence_id AS expiry_id
+                    FROM anomaly_expiry_evidence
+                )
+                GROUP BY lot_id
+                HAVING COUNT(*) > 1
+            """
+        else:
+            query = """
+                SELECT
+                    lot_id,
+                    COUNT(*) AS expiry_count,
+                    GROUP_CONCAT(expiry_id) AS expiry_ids
                 FROM expiry_batches
-
-                UNION ALL
-
-                SELECT
-                    lot_id,
-                    evidence_id AS expiry_id
-                FROM anomaly_expiry_evidence
-            )
-            GROUP BY lot_id
-            HAVING COUNT(*) > 1
+                GROUP BY lot_id
+                HAVING COUNT(*) > 1
             """
-        ).fetchall()
+
+        rows = connection.execute(query).fetchall()
 
         return [
             {
@@ -338,9 +346,7 @@ def detect_duplicate_expiries(db_path=None):
         connection.close()
 
 
-
 def detect_incorrect_tiers(db_path=None):
-
     connection = open_audit_connection(db_path)
 
     try:
@@ -384,26 +390,17 @@ def detect_incorrect_tiers(db_path=None):
         connection.close()
 
 
-
 def run_all_audits(db_path=None):
-
     balance_issues = audit_account_balances(db_path)
-
     foreign_key_issues = validate_foreign_keys(db_path)
-
     primary_key_issues = validate_primary_keys(db_path)
-
     arithmetic_issues = validate_order_arithmetic(db_path)
-
     over_redemptions = detect_over_redemptions(db_path)
-
     return_issues = detect_returns_without_reversal(db_path)
-
     duplicate_expiries = detect_duplicate_expiries(db_path)
-
     tier_issues = detect_incorrect_tiers(db_path)
 
-    return {
+    results = {
         "balance_mismatches": balance_issues,
         "foreign_key_issues": foreign_key_issues,
         "primary_key_issues": primary_key_issues,
@@ -411,30 +408,20 @@ def run_all_audits(db_path=None):
         "over_redemptions": over_redemptions,
         "returns_without_reversal": return_issues,
         "duplicate_expiries": duplicate_expiries,
-        "incorrect_tiers": tier_issues,
-
-        "total_issues": (
-            len(balance_issues)
-            + len(foreign_key_issues)
-            + len(primary_key_issues)
-            + len(arithmetic_issues)
-            + len(over_redemptions)
-            + len(return_issues)
-            + len(duplicate_expiries)
-            + len(tier_issues)
-        )
+        "incorrect_tiers": tier_issues
     }
+
+    results["total_issues"] = sum(
+        len(items) for items in results.values()
+    )
+
+    return results
 
 
 def compare_ground_truth(
     detected_results,
     ground_truth_path=DEFAULT_GROUND_TRUTH
 ):
-    """
-    Compare detected anomaly types and entity IDs against
-    the separate ground-truth JSON file.
-    """
-
     with open(
         ground_truth_path,
         "r",
@@ -442,20 +429,18 @@ def compare_ground_truth(
     ) as file:
         ground_truth_data = json.load(file)
 
-    detected_items = []
-
     result_mapping = {
-        "balance_mismatches": "account_id",
+        "balance_mismatches": "entity_id",
         "over_redemptions": "entity_id",
         "returns_without_reversal": "entity_id",
         "duplicate_expiries": "entity_id",
         "incorrect_tiers": "entity_id"
     }
 
+    detected_items = []
+
     for category, entity_key in result_mapping.items():
-
         for item in detected_results.get(category, []):
-
             detected_items.append({
                 "entity_id": item[entity_key],
                 "issue_type": item["issue_type"]

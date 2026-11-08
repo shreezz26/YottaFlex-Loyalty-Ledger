@@ -1,9 +1,7 @@
 
-
 import sys
 from pathlib import Path
 
-# Add the project root directory to Python's import path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 if str(PROJECT_ROOT) not in sys.path:
@@ -14,8 +12,14 @@ import pandas as pd
 import plotly.express as px
 
 from app.database import get_connection
-from app.audit import run_all_audits
+from app.audit import run_all_audits, compare_ground_truth
 
+
+MAIN_DB = PROJECT_ROOT / "data" / "loyalty.db"
+ANOMALY_DB = PROJECT_ROOT / "data" / "loyalty_anomaly.db"
+GROUND_TRUTH = (
+    PROJECT_ROOT / "data" / "generated" / "ground_truth.json"
+)
 
 
 st.set_page_config(
@@ -34,7 +38,8 @@ def load_data():
 
     try:
         customers = pd.read_sql_query(
-            "SELECT * FROM customers", connection
+            "SELECT * FROM customers",
+            connection
         )
 
         accounts = pd.read_sql_query(
@@ -53,7 +58,8 @@ def load_data():
         )
 
         orders = pd.read_sql_query(
-            "SELECT * FROM orders", connection
+            "SELECT * FROM orders",
+            connection
         )
 
         transactions = pd.read_sql_query(
@@ -71,10 +77,27 @@ def load_data():
         connection.close()
 
 
+@st.cache_data(ttl=10)
+def load_audit_results():
+    if not ANOMALY_DB.exists():
+        return None, None, None
+
+    results = run_all_audits(str(ANOMALY_DB))
+
+    comparison = None
+
+    if GROUND_TRUTH.exists():
+        comparison = compare_ground_truth(
+            results,
+            GROUND_TRUTH
+        )
+
+    return results, comparison, None
+
+
 customers, accounts, orders, transactions = load_data()
 
 
-# Sidebar
 st.sidebar.title("Navigation")
 
 page = st.sidebar.radio(
@@ -88,7 +111,6 @@ page = st.sidebar.radio(
 )
 
 
-# Overview
 if page == "Overview":
 
     st.subheader("Business Overview")
@@ -147,7 +169,10 @@ if page == "Overview":
                 hole=0.45
             )
 
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(
+                fig,
+                use_container_width=True
+            )
 
     with right:
         st.subheader("Points Transaction Types")
@@ -171,10 +196,12 @@ if page == "Overview":
                 text="Count"
             )
 
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(
+                fig,
+                use_container_width=True
+            )
 
 
-# Customers
 elif page == "Customers":
 
     st.subheader("Customer Loyalty Accounts")
@@ -217,13 +244,15 @@ elif page == "Customers":
             title="Points Balance Distribution"
         )
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(
+            fig,
+            use_container_width=True
+        )
 
     else:
         st.info("No customer accounts available.")
 
 
-# Transactions
 elif page == "Transactions":
 
     st.subheader("Points Transaction History")
@@ -263,29 +292,155 @@ elif page == "Transactions":
         st.info("No transactions available.")
 
 
-# Audit Intelligence
 elif page == "Audit Intelligence":
 
-    st.subheader("Audit Intelligence")
+    st.subheader("🔍 Audit Intelligence")
+    st.caption(
+        "Auditing the separate anomaly database against documented "
+        "ground-truth labels."
+    )
 
-    if st.button("Run Audit Checks"):
-
-        with st.spinner("Checking database integrity..."):
-
-            results = run_all_audits()
-
-        st.write("### Audit Results")
-
-        st.json(results)
-
-        st.success(
-            "Audit execution completed. Review the results above."
+    if not ANOMALY_DB.exists():
+        st.error(
+            "Anomaly database not found: "
+            f"{ANOMALY_DB}"
+        )
+        st.info(
+            "Create the anomaly database and run the anomaly generator "
+            "before using this module."
         )
 
-    st.info(
-        "Run the audit to inspect ledger balances, "
-        "foreign keys and order arithmetic."
-    )
+    else:
+        if st.button("Run Audit Checks", type="primary"):
+            load_audit_results.clear()
+
+        results, comparison, _ = load_audit_results()
+
+        if results is not None:
+
+            if comparison is not None:
+                metric1, metric2, metric3, metric4 = st.columns(4)
+
+                metric1.metric(
+                    "Expected Anomalies",
+                    comparison["expected_count"]
+                )
+
+                metric2.metric(
+                    "Detected Anomalies",
+                    comparison["detected_count"]
+                )
+
+                metric3.metric(
+                    "Precision",
+                    f'{comparison["precision"]:.0%}'
+                )
+
+                metric4.metric(
+                    "Recall",
+                    f'{comparison["recall"]:.0%}'
+                )
+
+                st.divider()
+
+                if (
+                    comparison["matched_count"]
+                    == comparison["expected_count"]
+                    and not comparison["missed"]
+                    and not comparison["unexpected"]
+                ):
+                    st.success(
+                        "All ground-truth anomalies were detected "
+                        "with no unexpected detections."
+                    )
+                else:
+                    st.warning(
+                        "Audit results differ from the ground-truth "
+                        "labels. Review the details below."
+                    )
+
+            st.subheader("Detected Anomaly Categories")
+
+            categories = [
+                ("Balance Mismatches", "balance_mismatches"),
+                ("Over-Redemptions", "over_redemptions"),
+                ("Returns Without Reversal", "returns_without_reversal"),
+                ("Duplicate Expiries", "duplicate_expiries"),
+                ("Incorrect Tier Calculations", "incorrect_tiers")
+            ]
+
+            category_columns = st.columns(5)
+
+            for column, (label, key) in zip(
+                category_columns,
+                categories
+            ):
+                column.metric(
+                    label,
+                    len(results.get(key, []))
+                )
+
+            for label, key in categories:
+                with st.expander(
+                    f"{label} ({len(results.get(key, []))})",
+                    expanded=True
+                ):
+                    records = results.get(key, [])
+
+                    if records:
+                        st.dataframe(
+                            pd.DataFrame(records),
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                    else:
+                        st.success("No issues detected.")
+
+            st.divider()
+            st.subheader("Database Integrity Checks")
+
+            integrity_columns = st.columns(4)
+
+            integrity_columns[0].metric(
+                "Foreign Key Issues",
+                len(results["foreign_key_issues"])
+            )
+
+            integrity_columns[1].metric(
+                "Primary Key Issues",
+                len(results["primary_key_issues"])
+            )
+
+            integrity_columns[2].metric(
+                "Order Arithmetic Issues",
+                len(results["arithmetic_issues"])
+            )
+
+            integrity_columns[3].metric(
+                "Total Audit Issues",
+                results["total_issues"]
+            )
+
+            if comparison is not None:
+                st.subheader("Ground-Truth Comparison")
+
+                st.json(comparison)
+
+            st.download_button(
+                "Download Audit Results JSON",
+                data=__import__("json").dumps(
+                    {
+                        "audit_results": results,
+                        "ground_truth_comparison": comparison
+                    },
+                    indent=2
+                ),
+                file_name="yottaflex_audit_results.json",
+                mime="application/json"
+            )
+
+        else:
+            st.error("Unable to load audit results.")
 
 
 st.sidebar.divider()
@@ -293,4 +448,3 @@ st.sidebar.divider()
 st.sidebar.caption(
     "YottaFlex AI Technologies | Loyalty Ledger v1.0"
 )
-
