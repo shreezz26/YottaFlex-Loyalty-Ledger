@@ -1,46 +1,262 @@
-
 # YottaFlex Loyalty Ledger & Audit Intelligence System
 
-A Python-based loyalty points management and audit intelligence platform developed for the YottaFlex AI Technologies 72-Hour Coding Challenge.
+A Python-based loyalty points management, synthetic data generation, and audit intelligence platform developed for the **YottaFlex AI Technologies 72-Hour Coding Challenge**.
 
-## Project Overview
+## 1. Project Overview
 
-The YottaFlex Loyalty Ledger manages the complete lifecycle of customer loyalty points.
+The YottaFlex Loyalty Ledger manages the lifecycle of customer loyalty points through an auditable transaction ledger.
 
-The platform supports:
+The system supports:
+
 - Customer and loyalty account management
-- Loyalty points accrual
+- Loyalty tier progression
+- Points accrual on eligible orders
 - Reward redemption
-- Points reversal for returned orders
-- Points expiry
-- Customer tier progression
-- Transaction history
-- Database integrity checks
-- Audit reporting
+- Full and partial returns with points reversals
+- Points expiration using point lots
+- Transaction history and balance reconciliation
+- Synthetic anomaly injection and detection
+- Database integrity validation
+- CSV, JSON, and SQL data exports
+- Interactive Streamlit audit dashboard
 
-## Problem Statement
+## 2. Problem Statement
 
 Loyalty platforms must accurately manage points earned, redeemed, reversed, and expired.
 
-Incorrect balances, duplicate transactions, invalid redemptions, and inaccurate tier calculations can cause financial and operational problems.
+Incorrect balances, duplicate expiry events, invalid redemptions, incomplete return reversals, and incorrect tier calculations can create financial and operational risks.
 
-This project aims to provide a structured, auditable loyalty ledger with traceable transaction records.
+This project implements a structured loyalty ledger that maintains transaction traceability and provides audit mechanisms to identify data inconsistencies.
 
-## Technology Stack
+## 3. Technology Stack
 
 | Technology | Purpose |
 |---|---|
-| Python | Application development |
-| SQLite | Database |
+| Python | Application logic and data generation |
+| SQLite | Relational database |
 | FastAPI | Backend REST API |
 | Streamlit | Interactive dashboard |
-| Pandas | Data analysis |
+| Pandas | Data processing and analysis |
 | Plotly | Data visualization |
 | Pytest | Automated testing |
-| YAML | Configuration management |
-| Git | Version control |
+| YAML | Configuration |
+| Git and GitHub | Version control |
 
-## Project Structure
+## 4. System Architecture
+
+The project is organized into four primary layers:
+
+1. **Database layer:** Stores customers, accounts, tiers, orders, point lots, transactions, returns, redemptions, expiry records, and audit issues.
+2. **Business logic layer:** Handles points accrual, redemption, returns, reversals, tier progression, and ledger operations.
+3. **Data generation layer:** Generates reproducible synthetic master data and dependent loyalty events.
+4. **Audit and visualization layer:** Injects labelled anomaly scenarios, runs audit checks, compares detections against ground truth, and displays results.
+
+## 5. Dataset and Generation Results
+
+The final generated demonstration dataset uses:
+
+- Random seed: `20261022`
+- Customers: **20,000**
+- Loyalty accounts: **20,000**
+- Orders: **100,000**
+- Order lines: **199,923**
+- Points transactions: **320,352**
+- Accrual transactions: **100,000**
+- Returns: **7,913**
+- Redemptions: **116,143**
+- Expiry records: **96,296**
+- Point lots: **100,000**
+- Tier history records: **37,040**
+
+All records are synthetic and do not represent real customer information.
+
+### Data generation
+
+Create and activate a virtual environment, install dependencies, and initialize the database:
+
+```bash
+python -m venv venv
+```
+
+Windows activation:
+
+```cmd
+venv\Scripts\activate
+```
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Initialize the database:
+
+```bash
+python -m app.database
+```
+
+Generate master data using the configured scale and seed:
+
+```bash
+python -m generator.generate --customers 20000 --orders 100000 --seed 20261022
+```
+
+Generate loyalty events:
+
+```bash
+python -m generator.transactions --seed 20261022
+```
+
+Check the available command-line options with `--help` if you want to change generation parameters.
+
+**Important:** The generation commands create or regenerate data. Run them against a fresh database or a backup when you want to reproduce the dataset; do not run them against your final database unless you intend to replace its contents.
+
+## 6. Loyalty Business Rules
+
+### Points accrual
+- Points are awarded for eligible completed orders.
+- Points are calculated using the applicable earning rate.
+- Each accrual is recorded in the transaction ledger.
+- Each accrual is associated with a point lot and expiry date.
+
+### Redemption
+- A redemption requires an existing account and reward.
+- Available points must be sufficient.
+- Eligible point lots are consumed using First Expiry, First Out (FEFO).
+- Successful redemptions create ledger transactions.
+- Account balances must not become negative.
+
+### Returns and reversals
+- Full and partial returns are supported.
+- Reversals are recorded as separate ledger transactions.
+- Original transaction references are retained for auditability.
+
+### Expiration
+- Only eligible lots with remaining points can expire.
+- Expiration is recorded in the ledger and expiry batch history.
+- An expired lot must not be expired twice.
+
+### Tier progression
+- Customer tiers are based on qualifying spend.
+- Tier changes are maintained in tier history.
+
+Refer to `docs/business_rules.md` for the detailed business rules.
+
+## 7. Audit Intelligence
+
+The system includes five labelled anomaly scenarios:
+
+| Anomaly | Description |
+|---|---|
+| BALANCE_MISMATCH | Stored account balance differs from ledger balance |
+| OVER_REDEMPTION | Redemption attempt exceeds available points |
+| RETURN_WITHOUT_REVERSAL | Returned order retains points that should have been reversed |
+| DUPLICATE_EXPIRY | A point lot has duplicate expiry evidence |
+| INCORRECT_TIER_CALCULATION | Assigned tier does not match qualifying spend |
+
+Ground-truth labels are maintained separately from the main loyalty dataset and must not be used as model input features.
+
+### Audit validation results
+
+| Metric | Result |
+|---|---:|
+| Expected anomalies | 5 |
+| Detected anomalies | 5 |
+| Matched anomalies | 5 |
+| Missed anomalies | 0 |
+| Unexpected anomalies | 0 |
+| Precision | 100% |
+| Recall | 100% |
+
+These results represent the five injected test scenarios, not a guarantee of detection accuracy on arbitrary real-world data.
+
+## 8. Data Integrity and Validation
+
+The project validates:
+
+- Primary key uniqueness
+- Foreign key integrity
+- Order arithmetic
+- Account balance reconciliation
+- Negative account balances
+- Transaction ID uniqueness
+- Ledger consistency
+- SQLite database integrity
+
+The final generated main database validation reported:
+
+- Balance mismatches: 0
+- Negative balances: 0
+- Foreign key violations: 0
+- SQLite integrity: `ok`
+
+## 9. Exports and Documentation
+
+The export utility generates table-level CSV and JSON files and a validation summary.
+
+Run:
+
+```bash
+python export_data.py
+```
+
+The project also includes an SQL seed dump generated from the database.
+
+Documentation:
+
+- `docs/DATA_DICTIONARY.md` — database entities, fields, and relationships.
+- `docs/business_rules.md` — loyalty business rules.
+- `data/generated/ground_truth.json` — labelled anomaly records.
+- `data/generated/ground_truth.csv` — CSV version of ground truth.
+
+Generated databases and exports are kept locally and are excluded from Git where configured in `.gitignore`. Run the generation and export commands to create them locally.
+
+## 10. Run the Application
+
+### FastAPI backend
+
+```bash
+uvicorn app.main:app --reload
+```
+
+API:
+
+`http://127.0.0.1:8000`
+
+Interactive API documentation:
+
+`http://127.0.0.1:8000/docs`
+
+### Streamlit dashboard
+
+```bash
+python -m streamlit run dashboard/dashboard.py
+```
+
+Dashboard:
+
+`http://localhost:8501`
+
+The dashboard presents the loyalty data overview and audit intelligence results.
+
+## 11. Run Automated Tests
+
+Run the project test suite:
+
+```bash
+python -m pytest -v
+```
+
+Run the anomaly detection validation:
+
+```bash
+python test_anomaly_detection.py
+```
+
+The completed test run passed, and all five injected anomaly scenarios matched their ground-truth labels.
+
+## 12. Project Structure
 
 ```text
 YottaFlex-Loyalty-Ledger/
@@ -50,11 +266,13 @@ YottaFlex-Loyalty-Ledger/
 │   ├── tier_engine.py
 │   ├── ledger_engine.py
 │   ├── audit.py
+│   ├── return_engine.py
 │   └── main.py
 │
 ├── generator/
 │   ├── generate.py
-│   └── transactions.py
+│   ├── transactions.py
+│   └── anomalies.py
 │
 ├── dashboard/
 │   └── dashboard.py
@@ -65,145 +283,37 @@ YottaFlex-Loyalty-Ledger/
 │   └── test_ledger.py
 │
 ├── docs/
-│   └── DATA_DICTIONARY.md
+│   ├── DATA_DICTIONARY.md
+│   └── business_rules.md
 │
 ├── data/
+│   └── generated/
+│
 ├── exports/
+│
 ├── config.yaml
+├── export_data.py
+├── test_anomaly_detection.py
 ├── requirements.txt
 ├── .gitignore
 └── README.md
 ```
 
-## Installation
+## 13. Reproducibility and Data Provenance
 
-### 1. Clone the repository
+The synthetic dataset uses a fixed random seed of `20261022` and configurable generation parameters.
 
-```bash
-git clone https://github.com/YOUR_USERNAME/YottaFlex-Loyalty-Ledger.git
-cd YottaFlex-Loyalty-Ledger
-```
+No external customer dataset is required. All demonstration records are synthetically generated for development, validation, and testing.
 
-### 2. Create a virtual environment
+For reproducibility, use the same seed and configuration. Compare generated row counts and validation results when recreating the dataset.
 
-```bash
-python -m venv venv
-```
+## 14. Disclaimer
 
-### 3. Activate the environment
+This project is developed for demonstration and coding challenge purposes. It uses synthetic data and is not connected to a real loyalty platform or financial system.
 
-Windows:
+## 15. Author
 
-```cmd
-venv\Scripts\activate
-```
+Developed as part of the **YottaFlex AI Technologies 72-Hour Coding Challenge**.
 
-### 4. Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-## Database Initialization
-
-```bash
-python -m app.database
-```
-
-## Generate Synthetic Data
-
-Generate 100 customers and 500 orders:
-
-```bash
-python -m generator.generate --customers 100 --orders 500 --seed 20261022
-```
-
-Generate points accrual transactions:
-
-```bash
-python -m generator.transactions
-```
-
-The random seed makes the master-data generation reproducible for the same configuration and parameters.
-
-## Run the Backend API
-
-```bash
-uvicorn app.main:app --reload
-```
-
-API URL:
-
-http://127.0.0.1:8000
-
-Interactive API documentation:
-
-http://127.0.0.1:8000/docs
-
-## Run the Dashboard
-
-```bash
-python -m streamlit run dashboard/dashboard.py
-```
-
-Dashboard URL:
-
-http://localhost:8501
-
-## Run Automated Tests
-
-```bash
-python -m pytest -v
-```
-
-## Database and Audit Documentation
-
-Refer to:
-
-`docs/DATA_DICTIONARY.md`
-
-This document describes the database entities, identifiers, relationships, and business rules.
-
-## Synthetic Dataset
-
-The current development dataset is generated locally using configurable parameters.
-
-Default random seed:
-
-`20261022`
-
-Current demonstration scale:
-
-- 100 customers
-- 100 loyalty accounts
-- 500 orders
-- 1,012 order lines
-- 500 accrual transactions
-
-## Development Status
-
-The current implementation includes:
-- Database schema
-- Synthetic master-data generation
-- Points accrual generation
-- FastAPI endpoints
-- Streamlit dashboard
-- Initial automated audit tests
-- Initial data dictionary
-
-Further development is required for:
-- Complete redemption and reversal event generation
-- Expiry event generation
-- Comprehensive tier progression
-- Five required labelled anomaly scenarios
-- Ground-truth dataset export
-- Full validation and reproducibility checks
-- SQL, CSV, and JSON exports
-
-## Disclaimer
-
-This project uses synthetic data for demonstration and testing. No real customer or financial information is included.
-
-## Author
-
-Developed as part of the YottaFlex AI Technologies coding challenge.
+GitHub Repository:  
+https://github.com/shreezz26/YottaFlex-Loyalty-Ledger
