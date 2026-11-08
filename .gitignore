@@ -1,0 +1,32 @@
+# Python temporary files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Virtual environment
+venv/
+.venv/
+
+# Secret files
+.env
+.env.*
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Generated data
+data/generated/*
+!data/generated/.gitkeep
+
+# Export files
+exports/*
+!exports/.gitkeep
+
+# VS Code settings
+.vscode/
+
+# Operating system files
+.DS_Store
+Thumbs.db

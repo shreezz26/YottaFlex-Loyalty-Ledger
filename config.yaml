@@ -1,0 +1,45 @@
+project:
+  name: "YottaFlex Loyalty Ledger"
+  version: "1.0.0"
+  random_seed: 20261022
+
+database:
+  path: "data/loyalty.db"
+
+generation:
+  customers: 20000
+  orders: 100000
+  target_points_transactions: 300000
+
+loyalty:
+  points_per_currency_unit: 1
+
+tiers:
+  - name: "Bronze"
+    minimum_spend: 0
+    earning_rate: 1.0
+
+  - name: "Silver"
+    minimum_spend: 10000
+    earning_rate: 1.25
+
+  - name: "Gold"
+    minimum_spend: 50000
+    earning_rate: 1.5
+
+  - name: "Platinum"
+    minimum_spend: 100000
+    earning_rate: 2.0
+
+redemption:
+  minimum_points: 100
+  points_per_currency_unit: 100
+
+expiry:
+  validity_days: 365
+
+data:
+  output_directory: "data/generated"
+
+exports:
+  output_directory: "exports"
